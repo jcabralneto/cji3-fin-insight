@@ -1,0 +1,55 @@
+-- supabase/migrations/20251027170000_seed_cost_legend.sql
+
+-- Limpar dados existentes
+TRUNCATE TABLE public.cost_class_legend;
+
+-- Inserir dados da legenda
+INSERT INTO public.cost_class_legend (account_number, cost_type, macro_cost_type, description, enel_group_external, bs_pl, ebitda) VALUES
+-- RECEITAS
+('400000', 'Receita de Serviços', 'Receita', 'Prestação de serviços', 'Internal', 'P&L', 'Y'),
+('401000', 'Receita de Projetos', 'Receita', 'Receita de projetos', 'Internal', 'P&L', 'Y'),
+('402000', 'Receita de Consultoria', 'Receita', 'Consultoria técnica', 'Internal', 'P&L', 'Y'),
+('410000', 'Receita de Vendas', 'Receita', 'Venda de produtos', 'Internal', 'P&L', 'Y'),
+('420000', 'Receita Financeira', 'Receita', 'Receitas financeiras', 'Internal', 'P&L', 'N'),
+
+-- IMPOSTOS
+('475110', 'ISS', 'Impostos', 'Imposto sobre Serviços', 'Internal', 'P&L', 'Y'),
+('476100', 'IRRF', 'Impostos', 'Imposto de Renda Retido na Fonte', 'Internal', 'P&L', 'Y'),
+('476200', 'INSS', 'Impostos', 'INSS', 'Internal', 'P&L', 'Y'),
+('476300', 'PIS', 'Impostos', 'PIS', 'Internal', 'P&L', 'Y'),
+('476400', 'COFINS', 'Impostos', 'COFINS', 'Internal', 'P&L', 'Y'),
+('476500', 'CSLL', 'Impostos', 'Contribuição Social sobre Lucro Líquido', 'Internal', 'P&L', 'Y'),
+('476600', 'IRPJ', 'Impostos', 'Imposto de Renda Pessoa Jurídica', 'Internal', 'P&L', 'Y'),
+
+-- CUSTOS DIRETOS
+('620000', 'Materiais Diretos', 'Custo Direto', 'Materiais de produção', 'External', 'P&L', 'Y'),
+('621000', 'Serviços Técnicos', 'Custo Direto', 'Serviços técnicos especializados', 'External', 'P&L', 'Y'),
+('622000', 'Consultoria Externa', 'Custo Direto', 'Consultoria de terceiros', 'External', 'P&L', 'Y'),
+('623000', 'Subcontratação', 'Custo Direto', 'Serviços subcontratados', 'External', 'P&L', 'Y'),
+('624000', 'Equipamentos', 'Custo Direto', 'Equipamentos de projeto', 'External', 'P&L', 'Y'),
+('625000', 'Software e Licenças', 'Custo Direto', 'Software para projetos', 'External', 'P&L', 'Y'),
+
+-- DESPESAS OPERACIONAIS - PESSOAL
+('630000', 'Salários', 'Despesa Operacional', 'Salários da equipe', 'Internal', 'P&L', 'N'),
+('631000', 'Encargos Sociais', 'Despesa Operacional', 'Encargos trabalhistas', 'Internal', 'P&L', 'N'),
+('632000', 'Benefícios', 'Despesa Operacional', 'Benefícios aos funcionários', 'Internal', 'P&L', 'N'),
+('633000', 'Treinamento', 'Despesa Operacional', 'Treinamento e desenvolvimento', 'Internal', 'P&L', 'N'),
+
+-- DESPESAS OPERACIONAIS - INFRAESTRUTURA
+('640000', 'Aluguel', 'Despesa Operacional', 'Aluguel de escritório', 'External', 'P&L', 'N'),
+('641000', 'Utilidades', 'Despesa Operacional', 'Água, luz, internet', 'External', 'P&L', 'N'),
+('642000', 'Manutenção', 'Despesa Operacional', 'Manutenção predial', 'External', 'P&L', 'N'),
+
+-- DESPESAS OPERACIONAIS - COMERCIAL
+('650000', 'Marketing', 'Despesa Operacional', 'Marketing e publicidade', 'External', 'P&L', 'N'),
+('651000', 'Comissões', 'Despesa Operacional', 'Comissões de vendas', 'Internal', 'P&L', 'N'),
+
+-- DESPESAS OPERACIONAIS - ADMINISTRATIVAS  
+('660000', 'Viagens', 'Despesa Operacional', 'Viagens e deslocamentos', 'External', 'P&L', 'N'),
+('661000', 'Comunicação', 'Despesa Operacional', 'Telefonia e comunicação', 'External', 'P&L', 'N'),
+('662000', 'Material de Escritório', 'Despesa Operacional', 'Materiais administrativos', 'External', 'P&L', 'N'),
+('663000', 'Serviços Jurídicos', 'Despesa Operacional', 'Assessoria jurídica', 'External', 'P&L', 'N'),
+('664000', 'Serviços Contábeis', 'Despesa Operacional', 'Contabilidade', 'External', 'P&L', 'N'),
+('665000', 'Seguros', 'Despesa Operacional', 'Seguros diversos', 'External', 'P&L', 'N'),
+('667000', 'Depreciação', 'Despesa Operacional', 'Depreciação de ativos', 'Internal', 'P&L', 'N'),
+('668000', 'Amortização', 'Despesa Operacional', 'Amortização de intangíveis', 'Internal', 'P&L', 'N');
