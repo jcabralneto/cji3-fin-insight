@@ -13,7 +13,7 @@ interface DREData {
 
 interface DREChartsProps {
   data: DREData;
-  currency: string;
+  currency: "BRL" | "EUR";
 }
 
 const DRECharts = ({ data, currency }: DREChartsProps) => {
@@ -45,16 +45,10 @@ const DRECharts = ({ data, currency }: DREChartsProps) => {
     },
   ];
 
-  // ========================================
-  // CORREÇÃO: Normalizar código de moeda
-  // ========================================
   const formatCurrency = (value: number) => {
-    // Garantir que o código de moeda seja válido (BRL ou EUR)
-    const currencyCode = currency === "BRL" || currency === "EUR" ? currency : "BRL";
-    
     return value.toLocaleString("pt-BR", {
       style: "currency",
-      currency: currencyCode,
+      currency: currency,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     });
