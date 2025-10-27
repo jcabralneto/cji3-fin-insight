@@ -93,9 +93,15 @@ serve(async (req) => {
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json<ExcelRow>(worksheet);
+    const data = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
 
     console.log(`[process-excel-upload] ${data.length} linhas encontradas no Excel`);
+    
+    // Logar amostra dos dados para debug
+    if (data.length > 0) {
+      console.log(`[process-excel-upload] Primeiras colunas detectadas:`, Object.keys(data[0]));
+      console.log(`[process-excel-upload] Primeira linha de dados:`, JSON.stringify(data[0]).substring(0, 500));
+    }
 
     // Buscar legenda de classificação
     const { data: legend, error: legendError } = await supabaseClient
@@ -116,12 +122,40 @@ serve(async (req) => {
     let skipped = 0;
 
     for (const row of data) {
-      // Validar campos obrigatórios
-      const postingDate = row['Data de Lançamento'] as string | number | Date | undefined;
-      const objectCode = row['Objeto'];
-      const costClass = row['Classe de Custo'];
-      const valueBRL = row['Valor BRL'];
-      const valueEUR = row['Valor EUR'];
+      // Tentar múltiplas variações dos nomes das colunas (com trim para remover espaços)
+      const keys = Object.keys(row);
+      const postingDate = (
+        row['Data de Lançamento'] || 
+        row['Data de Lancamento'] ||
+        row['Data'] ||
+        keys.find(k => k.toLowerCase().includes('data'))
+      ) as string | number | Date | undefined;
+      
+      const objectCode = (
+        row['Objeto'] ||
+        row['Object'] ||
+        keys.find(k => k.toLowerCase().includes('objeto'))
+      );
+      
+      const costClass = (
+        row['Classe de Custo'] ||
+        row['Classe'] ||
+        keys.find(k => k.toLowerCase().includes('classe'))
+      );
+      
+      const valueBRL = (
+        row['Valor BRL'] ||
+        row['BRL'] ||
+        row['Valor R$'] ||
+        keys.find(k => k.toLowerCase().includes('brl') || k.toLowerCase().includes('r$'))
+      );
+      
+      const valueEUR = (
+        row['Valor EUR'] ||
+        row['EUR'] ||
+        row['Valor €'] ||
+        keys.find(k => k.toLowerCase().includes('eur') || k.toLowerCase().includes('€'))
+      );
 
       // Skip linhas vazias ou inválidas
       if (!postingDate || !objectCode || !costClass || valueBRL === undefined || valueEUR === undefined) {
