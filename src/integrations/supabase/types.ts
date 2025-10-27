@@ -14,7 +14,183 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      cost_class_legend: {
+        Row: {
+          account_number: string
+          brazilian_description: string | null
+          bs_pl: string | null
+          cost_type: string
+          cost_type_capex: string | null
+          created_at: string | null
+          description: string | null
+          ebitda: string | null
+          enel_group_external: string | null
+          id: string
+          macro_cost_type: string
+          updated_at: string | null
+        }
+        Insert: {
+          account_number: string
+          brazilian_description?: string | null
+          bs_pl?: string | null
+          cost_type: string
+          cost_type_capex?: string | null
+          created_at?: string | null
+          description?: string | null
+          ebitda?: string | null
+          enel_group_external?: string | null
+          id?: string
+          macro_cost_type: string
+          updated_at?: string | null
+        }
+        Update: {
+          account_number?: string
+          brazilian_description?: string | null
+          bs_pl?: string | null
+          cost_type?: string
+          cost_type_capex?: string | null
+          created_at?: string | null
+          description?: string | null
+          ebitda?: string | null
+          enel_group_external?: string | null
+          id?: string
+          macro_cost_type?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      financial_entries: {
+        Row: {
+          corrected_value_brl: number
+          corrected_value_eur: number
+          cost_class: string
+          cost_class_description: string | null
+          cost_type: string | null
+          created_at: string | null
+          currency: string | null
+          document_number: string | null
+          document_text: string | null
+          entry_date: string | null
+          entry_type: string | null
+          id: string
+          is_duplicate: boolean | null
+          is_unrecognized: boolean | null
+          macro_cost_type: string | null
+          object_code: string
+          object_name: string | null
+          pep_element: string | null
+          posting_date: string
+          purchase_document: string | null
+          reference_document: string | null
+          updated_at: string | null
+          upload_id: string | null
+          user_id: string | null
+          value_brl: number
+          value_eur: number
+        }
+        Insert: {
+          corrected_value_brl: number
+          corrected_value_eur: number
+          cost_class: string
+          cost_class_description?: string | null
+          cost_type?: string | null
+          created_at?: string | null
+          currency?: string | null
+          document_number?: string | null
+          document_text?: string | null
+          entry_date?: string | null
+          entry_type?: string | null
+          id?: string
+          is_duplicate?: boolean | null
+          is_unrecognized?: boolean | null
+          macro_cost_type?: string | null
+          object_code: string
+          object_name?: string | null
+          pep_element?: string | null
+          posting_date: string
+          purchase_document?: string | null
+          reference_document?: string | null
+          updated_at?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+          value_brl: number
+          value_eur: number
+        }
+        Update: {
+          corrected_value_brl?: number
+          corrected_value_eur?: number
+          cost_class?: string
+          cost_class_description?: string | null
+          cost_type?: string | null
+          created_at?: string | null
+          currency?: string | null
+          document_number?: string | null
+          document_text?: string | null
+          entry_date?: string | null
+          entry_type?: string | null
+          id?: string
+          is_duplicate?: boolean | null
+          is_unrecognized?: boolean | null
+          macro_cost_type?: string | null
+          object_code?: string
+          object_name?: string | null
+          pep_element?: string | null
+          posting_date?: string
+          purchase_document?: string | null
+          reference_document?: string | null
+          updated_at?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+          value_brl?: number
+          value_eur?: number
+        }
+        Relationships: []
+      }
+      upload_history: {
+        Row: {
+          classified_entries: number | null
+          completed_at: string | null
+          created_at: string | null
+          duplicate_entries: number | null
+          error_message: string | null
+          file_name: string
+          file_size: number
+          id: string
+          status: string | null
+          total_entries: number | null
+          unrecognized_entries: number | null
+          user_id: string | null
+        }
+        Insert: {
+          classified_entries?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          duplicate_entries?: number | null
+          error_message?: string | null
+          file_name: string
+          file_size: number
+          id?: string
+          status?: string | null
+          total_entries?: number | null
+          unrecognized_entries?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          classified_entries?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          duplicate_entries?: number | null
+          error_message?: string | null
+          file_name?: string
+          file_size?: number
+          id?: string
+          status?: string | null
+          total_entries?: number | null
+          unrecognized_entries?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
