@@ -13,7 +13,7 @@ interface DREData {
 
 interface DREChartsProps {
   data: DREData;
-  currency: "BRL" | "EUR";
+  currency: string; // Accepts "BRL" | "EUR" or symbols like "R$" | "€"
 }
 
 const DRECharts = ({ data, currency }: DREChartsProps) => {
@@ -46,12 +46,25 @@ const DRECharts = ({ data, currency }: DREChartsProps) => {
   ];
 
   const formatCurrency = (value: number) => {
-    return value.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    });
+    const normalize = (c: string) => {
+      if (!c) return 'BRL';
+      const up = c.toUpperCase();
+      if (up === 'R$' || up === 'BRL') return 'BRL';
+      if (c === '€' || up === 'EUR') return 'EUR';
+      return 'BRL';
+    };
+    const code = normalize(currency);
+    try {
+      return value.toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: code,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      });
+    } catch {
+      const symbol = code === 'EUR' ? '€' : 'R$';
+      return `${symbol} ${value.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    }
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
