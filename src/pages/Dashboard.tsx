@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/browserClient";
 import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Calendar } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DREStructure from "@/components/dashboard/DREStructure";
