@@ -169,15 +169,27 @@ const Upload = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await supabase.functions.invoke('process-excel-upload', {
+      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-excel-upload`;
+
+      const res = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string,
+        },
         body: formData,
       });
 
-      if (response.error) throw response.error;
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const msg = (data && (data.error || data.message)) || 'Falha ao processar upload';
+        throw new Error(msg);
+      }
 
       toast({
         title: "Upload processado com sucesso!",
-        description: `${response.data.summary.total} lançamentos processados.`,
+        description: `${data?.summary?.total ?? 0} lançamentos processados.`,
       });
 
       navigate('/dashboard');
