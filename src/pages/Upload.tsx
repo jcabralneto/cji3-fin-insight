@@ -155,40 +155,37 @@ const Upload = () => {
   };
 
   const handleConfirmAndProcess = async () => {
+    if (!file) return;
+    
     setIsSaving(true);
     
     try {
-      // Preparar dados para inserção no banco
-      const dataToInsert = previewData.map(row => ({
-        posting_date: new Date(row.date.split('/').reverse().join('-')).toISOString(),
-        object_code: row.object,
-        cost_class: row.costClass,
-        value_brl: row.valueBRL,
-        value_eur: row.valueEUR,
-        corrected_value_brl: row.valueBRL,
-        corrected_value_eur: row.valueEUR,
-        cost_type: row.costType,
-        macro_cost_type: row.macroCostType,
-      }));
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('Você precisa estar autenticado');
+      }
 
-      const { error } = await supabase
-        .from('financial_entries')
-        .insert(dataToInsert);
+      const formData = new FormData();
+      formData.append('file', file);
 
-      if (error) throw error;
-
-      toast({
-        title: "Dados salvos com sucesso!",
-        description: "Os lançamentos foram salvos no banco de dados.",
+      const response = await supabase.functions.invoke('process-excel-upload', {
+        body: formData,
       });
 
-      // Redirecionar para o dashboard
-      navigate('/dashboard');
-    } catch (error) {
-      console.error('Erro ao salvar dados:', error);
+      if (response.error) throw response.error;
+
       toast({
-        title: "Erro ao salvar dados",
-        description: "Ocorreu um erro ao salvar os dados. Tente novamente.",
+        title: "Upload processado com sucesso!",
+        description: `${response.data.summary.total} lançamentos processados.`,
+      });
+
+      navigate('/dashboard');
+    } catch (error: any) {
+      console.error('Erro ao processar upload:', error);
+      toast({
+        title: "Erro ao processar upload",
+        description: error.message || "Ocorreu um erro. Tente novamente.",
         variant: "destructive",
       });
     } finally {

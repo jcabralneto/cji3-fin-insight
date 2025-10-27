@@ -1,15 +1,58 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Upload, BarChart3, Sparkles, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/browserClient";
+import { User } from "@supabase/supabase-js";
 
 const Index = () => {
+  const navigate = useNavigate();
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-accent opacity-20"></div>
-        <div className="relative max-w-7xl mx-auto px-6 py-24">
+        
+        {/* Header */}
+        <div className="relative max-w-7xl mx-auto px-6 pt-6">
+          <div className="flex items-center justify-between mb-12">
+            <div className="flex items-center space-x-2">
+              <FileSpreadsheet className="h-8 w-8 text-primary" />
+              <span className="text-2xl font-bold">DRE Manager</span>
+            </div>
+            <div className="flex items-center gap-4">
+              {user ? (
+                <>
+                  <span className="text-sm text-muted-foreground">{user.email}</span>
+                  <Button variant="outline" onClick={handleSignOut}>Sair</Button>
+                </>
+              ) : (
+                <Button onClick={() => navigate('/auth')}>Entrar</Button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative max-w-7xl mx-auto px-6 pb-24">
           <div className="text-center space-y-8">
             <div className="space-y-4">
               <h1 className="text-6xl font-bold bg-gradient-accent bg-clip-text text-transparent leading-tight">
