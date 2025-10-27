@@ -27,10 +27,12 @@ const Index = () => {
                   Começar Análise
                 </Button>
               </Link>
-              <Button size="lg" variant="outline" className="text-lg px-8">
-                <Sparkles className="w-5 h-5 mr-2" />
-                Ver Demo
-              </Button>
+              <Link to="/dashboard">
+                <Button size="lg" variant="outline" className="text-lg px-8">
+                  <BarChart3 className="w-5 h-5 mr-2" />
+                  Ver Dashboard
+                </Button>
+              </Link>
             </div>
           </div>
         </div>
