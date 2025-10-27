@@ -88,24 +88,41 @@ serve(async (req) => {
 
     console.log(`[process-excel-upload] Upload history criado: ${uploadHistory.id}`);
 
-    // Processar Excel - pular linha de cabeçalho
+    // Processar Excel com leitura explícita de cabeçalho
     const arrayBuffer = await file.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    
-    // Usar range para pular a primeira linha (cabeçalho já processado)
-    const data = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
-      range: 1, // Começa da segunda linha (índice 1)
-      raw: false // Converte datas e números para strings automaticamente
-    });
 
-    console.log(`[process-excel-upload] ${data.length} linhas de dados encontradas (excluindo cabeçalho)`);
-    
-    if (data.length > 0) {
-      console.log(`[process-excel-upload] Colunas:`, Object.keys(data[0]));
-      console.log(`[process-excel-upload] Primeira linha real:`, JSON.stringify(data[0]).substring(0, 500));
+    // Lê todas as linhas como arrays, a primeira será o cabeçalho
+    const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false }) as any[][];
+    if (!rows || rows.length < 2) {
+      throw new Error('Planilha sem dados após o cabeçalho');
     }
+
+    const headersRaw = (rows[0] as any[]).map((h) => (typeof h === 'string' ? h.trim() : ''));
+    const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/\s+/g, ' ').trim();
+    const headersNorm = headersRaw.map(normalize);
+
+    const findIdx = (...cands: string[]) => {
+      for (const c of cands) {
+        const idx = headersNorm.findIndex((h) => h.includes(normalize(c)));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+
+    const idxDate = findIdx('data de lancamento', 'data');
+    const idxObject = findIdx('denominacao de objeto', 'objeto');
+    const idxCostClass = findIdx('classe de custo', 'classe');
+    const idxValLocal = findIdx('montante em moeda interna', 'valor brl');
+    const idxValDoc = findIdx('montante na moeda do documento', 'montante em moeda do documento', 'valor eur');
+    const idxCurrencyDoc = findIdx('moeda do documento', 'moeda do doc', 'moeda');
+
+    console.log('[process-excel-upload] Cabeçalho detectado:', headersRaw);
+    console.log('[process-excel-upload] Índices -> data:', idxDate, 'obj:', idxObject, 'classe:', idxCostClass, 'valLocal:', idxValLocal, 'valDoc:', idxValDoc, 'moedaDoc:', idxCurrencyDoc);
+
+    const dataRows = rows.slice(1);
 
     // Buscar legenda de classificação
     const { data: legend, error: legendError } = await supabaseClient
@@ -125,43 +142,58 @@ serve(async (req) => {
     let unrecognized = 0;
     let skipped = 0;
 
-    for (const row of data) {
-      // Mapear colunas pelo nome exato detectado
-      const postingDate = row['Data de lançamento'] as string | number | Date | undefined;
-      const objectCode = row['Denominação de objeto'] || row['Objeto'];
-      const costClass = row['Classe de custo'];
-      
-      // Buscar valores em reais e euros - tentar diferentes variações
-      const valueBRL = row['Montante em Moeda interna'] || 
-                       row['Valor BRL'] || 
-                       row['Montante (BRL)'];
-      
-      const valueEUR = row['Montante na moeda do doc.'] || 
-                       row['Valor EUR'] || 
-                       row['Montante (EUR)'];
+    for (const arr of dataRows) {
+      const row = arr as any[];
+      const postingDate = idxDate >= 0 ? row[idxDate] : undefined;
+      const objectCode = idxObject >= 0 ? row[idxObject] : undefined;
+      const costClass = idxCostClass >= 0 ? row[idxCostClass] : undefined;
+      const rawLocal = idxValLocal >= 0 ? row[idxValLocal] : undefined;
+      const rawDoc = idxValDoc >= 0 ? row[idxValDoc] : undefined;
+      const currencyDoc = (idxCurrencyDoc >= 0 ? row[idxCurrencyDoc] : undefined) as string | undefined;
 
-      // Skip linhas vazias ou inválidas
+      const parseNumber = (v: any) => {
+        if (v === null || v === undefined || v === '') return undefined;
+        if (typeof v === 'number') return v;
+        const s = String(v).replace(/\./g, '').replace(/,/g, '.').replace(/[^0-9.-]/g, '');
+        const n = parseFloat(s);
+        return isNaN(n) ? undefined : n;
+      };
+
+      const valueBRL = parseNumber(rawLocal);
+      const valueEUR = parseNumber(rawDoc);
+
+      // Validar campos obrigatórios
       if (!postingDate || !objectCode || !costClass || valueBRL === undefined || valueEUR === undefined) {
-        console.log(`[process-excel-upload] Linha ignorada por falta de dados obrigatórios:`, {
-          postingDate, objectCode, costClass, valueBRL, valueEUR
-        });
+        console.log('[process-excel-upload] Linha ignorada por falta de dados obrigatórios:', { postingDate, objectCode, costClass, valueBRL, valueEUR, currencyDoc });
         skipped++;
         continue;
       }
 
-      // Converter data se necessário
+      // Converter data
       let formattedDate: string;
-      if (typeof postingDate === 'string') {
-        formattedDate = postingDate;
-      } else if (typeof postingDate === 'number') {
-        // Excel date serial number
+      if (typeof postingDate === 'number') {
         const excelEpoch = new Date(1899, 11, 30);
         const date = new Date(excelEpoch.getTime() + postingDate * 86400000);
         formattedDate = date.toISOString().split('T')[0];
+      } else if (typeof postingDate === 'string') {
+        const s = postingDate.trim();
+        const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (m) {
+          const [_, d, mo, y] = m;
+          formattedDate = `${y}-${mo}-${d}`;
+        } else {
+          const d = new Date(s);
+          if (isNaN(d.getTime())) {
+            console.log('[process-excel-upload] Data inválida, pulando:', s);
+            skipped++;
+            continue;
+          }
+          formattedDate = d.toISOString().split('T')[0];
+        }
       } else {
-        // Assume Date object
-        formattedDate = (postingDate as Date).toISOString().split('T')[0];
+        formattedDate = new Date(postingDate as any).toISOString().split('T')[0];
       }
+
 
       // Buscar classificação na legenda
       const classification = legend?.find(l => l.account_number === costClass);
@@ -193,21 +225,21 @@ serve(async (req) => {
         object_name: objectCode,
         cost_class: costClass,
         cost_class_description: classification?.description || null,
-        cost_type: classification?.cost_type || row['Tipo de Custo'] || null,
-        macro_cost_type: classification?.macro_cost_type || row['Macro Tipo de Custo'] || null,
+        cost_type: classification?.cost_type || null,
+        macro_cost_type: classification?.macro_cost_type || null,
         value_brl: valueBRL,
         value_eur: valueEUR,
         corrected_value_brl: valueBRL,
         corrected_value_eur: valueEUR,
         is_duplicate: isDuplicate,
         is_unrecognized: !classification,
-        pep_element: row['Elemento PEP'] || null,
-        document_text: row['Texto do Documento'] || null,
-        document_number: row['Número do Documento'] || null,
-        purchase_document: row['Documento de Compra'] || null,
-        reference_document: row['Documento de Referência'] || null,
-        entry_type: row['Tipo de Lançamento'] || null,
-        currency: row['Moeda'] || null,
+        pep_element: null,
+        document_text: null,
+        document_number: null,
+        purchase_document: null,
+        reference_document: null,
+        entry_type: null,
+        currency: currencyDoc || null,
       });
     }
 
