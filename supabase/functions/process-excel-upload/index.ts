@@ -1,3 +1,4 @@
+// supabase/functions/process-excel-upload/index.ts
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.76.1";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
@@ -6,23 +7,6 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-interface ExcelRow {
-  'Data de Lançamento': string;
-  'Objeto': string;
-  'Classe de Custo': string;
-  'Valor BRL': number;
-  'Valor EUR': number;
-  'Tipo de Custo'?: string;
-  'Macro Tipo de Custo'?: string;
-  'Elemento PEP'?: string;
-  'Texto do Documento'?: string;
-  'Número do Documento'?: string;
-  'Documento de Compra'?: string;
-  'Documento de Referência'?: string;
-  'Tipo de Lançamento'?: string;
-  'Moeda'?: string;
-}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -39,12 +23,8 @@ serve(async (req) => {
     }
 
     const supabaseClient = createClient(supabaseUrl, supabaseKey, {
-      auth: {
-        persistSession: false,
-      },
-      global: {
-        headers: { Authorization: authHeader },
-      },
+      auth: { persistSession: false },
+      global: { headers: { Authorization: authHeader } },
     });
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
@@ -62,14 +42,13 @@ serve(async (req) => {
       throw new Error('Arquivo não encontrado');
     }
 
-    // Validar tamanho (10MB max)
     if (file.size > 10 * 1024 * 1024) {
       throw new Error('Arquivo muito grande. Máximo: 10MB');
     }
 
-    console.log(`[process-excel-upload] Arquivo recebido: ${file.name}, tamanho: ${file.size} bytes`);
+    console.log(`[process-excel-upload] Arquivo: ${file.name}, tamanho: ${file.size} bytes`);
 
-    // Criar registro de upload_history
+    // Criar registro de upload
     const { data: uploadHistory, error: uploadError } = await supabaseClient
       .from('upload_history')
       .insert({
@@ -88,43 +67,34 @@ serve(async (req) => {
 
     console.log(`[process-excel-upload] Upload history criado: ${uploadHistory.id}`);
 
-    // Processar Excel com leitura explícita de cabeçalho
+    // Processar Excel
     const arrayBuffer = await file.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
 
-    // Lê todas as linhas como arrays, a primeira será o cabeçalho
-    const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false }) as any[][];
-    if (!rows || rows.length < 2) {
-      throw new Error('Planilha sem dados após o cabeçalho');
+    // Ler com range para pegar a primeira linha como cabeçalho
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+      header: 1, 
+      raw: false,
+      defval: null 
+    });
+
+    if (!jsonData || jsonData.length < 2) {
+      throw new Error('Planilha sem dados');
     }
 
-    const headersRaw = (rows[0] as any[]).map((h) => (typeof h === 'string' ? h.trim() : ''));
-    const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/\s+/g, ' ').trim();
-    const headersNorm = headersRaw.map(normalize);
+    // MAPEAMENTO CORRETO DAS COLUNAS CJI3
+    // Índice 0 = Coluna A, Índice 1 = Coluna B, etc.
+    const COL_POSTING_DATE = 1;  // Coluna B
+    const COL_OBJECT = 3;         // Coluna D  
+    const COL_COST_CLASS = 5;     // Coluna F
+    const COL_VALUE_EUR = 9;      // Coluna J
+    const COL_VALUE_BRL = 20;     // Coluna U
 
-    const findIdx = (...cands: string[]) => {
-      for (const c of cands) {
-        const idx = headersNorm.findIndex((h) => h.includes(normalize(c)));
-        if (idx !== -1) return idx;
-      }
-      return -1;
-    };
+    const dataRows = jsonData.slice(1); // Pular cabeçalho
 
-    const idxDate = findIdx('data de lancamento', 'data');
-    const idxObject = findIdx('denominacao de objeto', 'objeto');
-    const idxCostClass = findIdx('classe de custo', 'classe');
-    const idxValLocal = findIdx('montante em moeda interna', 'valor brl');
-    const idxValDoc = findIdx('montante na moeda do documento', 'montante em moeda do documento', 'valor eur');
-    const idxCurrencyDoc = findIdx('moeda do documento', 'moeda do doc', 'moeda');
-
-    console.log('[process-excel-upload] Cabeçalho detectado:', headersRaw);
-    console.log('[process-excel-upload] Índices -> data:', idxDate, 'obj:', idxObject, 'classe:', idxCostClass, 'valLocal:', idxValLocal, 'valDoc:', idxValDoc, 'moedaDoc:', idxCurrencyDoc);
-
-    const dataRows = rows.slice(1);
-
-    // Buscar legenda de classificação
+    // Buscar legenda
     const { data: legend, error: legendError } = await supabaseClient
       .from('cost_class_legend')
       .select('*');
@@ -134,140 +104,147 @@ serve(async (req) => {
       throw legendError;
     }
 
-    console.log(`[process-excel-upload] ${legend?.length || 0} entradas na legenda`);
+    console.log(`[process-excel-upload] ${legend?.length || 0} classes na legenda`);
 
-    // Processar e enriquecer dados
+    // Processar linhas
     const entries = [];
     let duplicates = 0;
     let unrecognized = 0;
-    let skipped = 0;
+    let processed = 0;
 
-    for (const arr of dataRows) {
-      const row = arr as any[];
-      const postingDate = idxDate >= 0 ? row[idxDate] : undefined;
-      const objectCode = idxObject >= 0 ? row[idxObject] : undefined;
-      const costClass = idxCostClass >= 0 ? row[idxCostClass] : undefined;
-      const rawLocal = idxValLocal >= 0 ? row[idxValLocal] : undefined;
-      const rawDoc = idxValDoc >= 0 ? row[idxValDoc] : undefined;
-      const currencyDoc = (idxCurrencyDoc >= 0 ? row[idxCurrencyDoc] : undefined) as string | undefined;
+    for (const row of dataRows) {
+      try {
+        const postingDateRaw = row[COL_POSTING_DATE];
+        const objectCode = row[COL_OBJECT];
+        const costClass = String(row[COL_COST_CLASS] || '').trim();
+        const valueEURRaw = row[COL_VALUE_EUR];
+        const valueBRLRaw = row[COL_VALUE_BRL];
 
-      const parseNumber = (v: any) => {
-        if (v === null || v === undefined || v === '') return undefined;
-        if (typeof v === 'number') return v;
-        const s = String(v).replace(/\./g, '').replace(/,/g, '.').replace(/[^0-9.-]/g, '');
-        const n = parseFloat(s);
-        return isNaN(n) ? undefined : n;
-      };
+        // Validar campos obrigatórios
+        if (!postingDateRaw || !objectCode || !costClass || valueEURRaw === null || valueBRLRaw === null) {
+          continue;
+        }
 
-      const valueBRL = parseNumber(rawLocal);
-      const valueEUR = parseNumber(rawDoc);
+        // Parsear valores
+        const parseValue = (v: any): number => {
+          if (typeof v === 'number') return v;
+          const str = String(v).replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
+          const num = parseFloat(str);
+          return isNaN(num) ? 0 : num;
+        };
 
-      // Validar campos obrigatórios
-      if (!postingDate || !objectCode || !costClass || valueBRL === undefined || valueEUR === undefined) {
-        console.log('[process-excel-upload] Linha ignorada por falta de dados obrigatórios:', { postingDate, objectCode, costClass, valueBRL, valueEUR, currencyDoc });
-        skipped++;
+        const valueEUR = parseValue(valueEURRaw);
+        const valueBRL = parseValue(valueBRLRaw);
+
+        // Converter data
+        let formattedDate: string;
+        if (typeof postingDateRaw === 'number') {
+          // Data serial do Excel
+          const excelEpoch = new Date(1899, 11, 30);
+          const date = new Date(excelEpoch.getTime() + postingDateRaw * 86400000);
+          formattedDate = date.toISOString().split('T')[0];
+        } else {
+          // Tentar parse de string
+          const dateStr = String(postingDateRaw).trim();
+          const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+          if (match) {
+            const [_, day, month, year] = match;
+            formattedDate = `${year}-${month}-${day}`;
+          } else {
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) continue;
+            formattedDate = date.toISOString().split('T')[0];
+          }
+        }
+
+        // Buscar classificação
+        const classification = legend?.find(l => l.account_number === costClass);
+        
+        if (!classification) {
+          unrecognized++;
+        }
+
+        // ========================================
+        // CORREÇÃO DE SINAIS (REGRA SAP CJI3)
+        // ========================================
+        // Valores NEGATIVOS no SAP = RECEITAS (Crédito) → Converter para POSITIVO
+        // Valores POSITIVOS no SAP = DESPESAS (Débito) → Manter POSITIVO
+        const correctedValueEUR = Math.abs(valueEUR);
+        const correctedValueBRL = Math.abs(valueBRL);
+
+        // Verificar duplicatas
+        const { data: existing } = await supabaseClient
+          .from('financial_entries')
+          .select('id')
+          .eq('posting_date', formattedDate)
+          .eq('object_code', objectCode)
+          .eq('cost_class', costClass)
+          .eq('value_brl', valueBRL)
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        const isDuplicate = !!existing;
+        if (isDuplicate) {
+          duplicates++;
+        }
+
+        entries.push({
+          user_id: user.id,
+          upload_id: uploadHistory.id,
+          posting_date: formattedDate,
+          object_code: String(objectCode).trim(),
+          object_name: String(objectCode).trim(),
+          cost_class: costClass,
+          cost_class_description: classification?.description || null,
+          cost_type: classification?.cost_type || null,
+          macro_cost_type: classification?.macro_cost_type || null,
+          value_brl: valueBRL,  // Valor original (com sinal)
+          value_eur: valueEUR,  // Valor original (com sinal)
+          corrected_value_brl: correctedValueBRL,  // Valor corrigido (sempre positivo)
+          corrected_value_eur: correctedValueEUR,  // Valor corrigido (sempre positivo)
+          is_duplicate: isDuplicate,
+          is_unrecognized: !classification,
+          entry_type: valueEUR < 0 ? 'credit' : 'debit',
+          pep_element: null,
+          document_text: null,
+          document_number: null,
+          purchase_document: null,
+          reference_document: null,
+          currency: null,
+        });
+
+        processed++;
+      } catch (rowError) {
+        console.error('[process-excel-upload] Erro ao processar linha:', rowError);
         continue;
       }
-
-      // Converter data
-      let formattedDate: string;
-      if (typeof postingDate === 'number') {
-        const excelEpoch = new Date(1899, 11, 30);
-        const date = new Date(excelEpoch.getTime() + postingDate * 86400000);
-        formattedDate = date.toISOString().split('T')[0];
-      } else if (typeof postingDate === 'string') {
-        const s = postingDate.trim();
-        const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-        if (m) {
-          const [_, d, mo, y] = m;
-          formattedDate = `${y}-${mo}-${d}`;
-        } else {
-          const d = new Date(s);
-          if (isNaN(d.getTime())) {
-            console.log('[process-excel-upload] Data inválida, pulando:', s);
-            skipped++;
-            continue;
-          }
-          formattedDate = d.toISOString().split('T')[0];
-        }
-      } else {
-        formattedDate = new Date(postingDate as any).toISOString().split('T')[0];
-      }
-
-
-      // Buscar classificação na legenda
-      const classification = legend?.find(l => l.account_number === costClass);
-      
-      if (!classification) {
-        unrecognized++;
-      }
-
-      // Verificar duplicatas (mesma data, objeto, valor)
-      const { data: existing } = await supabaseClient
-        .from('financial_entries')
-        .select('id')
-        .eq('posting_date', formattedDate)
-        .eq('object_code', objectCode)
-        .eq('value_brl', valueBRL)
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      const isDuplicate = !!existing;
-      if (isDuplicate) {
-        duplicates++;
-      }
-
-      entries.push({
-        user_id: user.id,
-        upload_id: uploadHistory.id,
-        posting_date: formattedDate,
-        object_code: objectCode,
-        object_name: objectCode,
-        cost_class: costClass,
-        cost_class_description: classification?.description || null,
-        cost_type: classification?.cost_type || null,
-        macro_cost_type: classification?.macro_cost_type || null,
-        value_brl: valueBRL,
-        value_eur: valueEUR,
-        corrected_value_brl: valueBRL,
-        corrected_value_eur: valueEUR,
-        is_duplicate: isDuplicate,
-        is_unrecognized: !classification,
-        pep_element: null,
-        document_text: null,
-        document_number: null,
-        purchase_document: null,
-        reference_document: null,
-        entry_type: null,
-        currency: currencyDoc || null,
-      });
     }
 
-    console.log(`[process-excel-upload] Preparando inserção de ${entries.length} entradas`);
-    console.log(`[process-excel-upload] Duplicatas: ${duplicates}, Não reconhecidos: ${unrecognized}, Ignoradas: ${skipped}`);
+    console.log(`[process-excel-upload] Processadas ${processed} linhas, inserindo ${entries.length} entradas`);
 
     // Inserir entradas
-    const { error: insertError } = await supabaseClient
-      .from('financial_entries')
-      .insert(entries);
+    if (entries.length > 0) {
+      const { error: insertError } = await supabaseClient
+        .from('financial_entries')
+        .insert(entries);
 
-    if (insertError) {
-      console.error('[process-excel-upload] Erro ao inserir entradas:', insertError);
-      
-      // Atualizar status com erro
-      await supabaseClient
-        .from('upload_history')
-        .update({
-          status: 'failed',
-          error_message: insertError.message,
-        })
-        .eq('id', uploadHistory.id);
+      if (insertError) {
+        console.error('[process-excel-upload] Erro ao inserir:', insertError);
+        
+        await supabaseClient
+          .from('upload_history')
+          .update({
+            status: 'failed',
+            error_message: insertError.message,
+          })
+          .eq('id', uploadHistory.id);
 
-      throw insertError;
+        throw insertError;
+      }
     }
 
-    // Atualizar upload_history com sucesso
-    const { error: updateError } = await supabaseClient
+    // Atualizar upload_history
+    await supabaseClient
       .from('upload_history')
       .update({
         status: 'completed',
@@ -279,11 +256,7 @@ serve(async (req) => {
       })
       .eq('id', uploadHistory.id);
 
-    if (updateError) {
-      console.error('[process-excel-upload] Erro ao atualizar upload_history:', updateError);
-    }
-
-    console.log(`[process-excel-upload] Processamento concluído com sucesso`);
+    console.log(`[process-excel-upload] Concluído com sucesso`);
 
     return new Response(
       JSON.stringify({
