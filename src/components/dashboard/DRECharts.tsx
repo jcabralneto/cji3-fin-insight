@@ -45,10 +45,16 @@ const DRECharts = ({ data, currency }: DREChartsProps) => {
     },
   ];
 
+  // ========================================
+  // CORREÇÃO: Normalizar código de moeda
+  // ========================================
   const formatCurrency = (value: number) => {
+    // Garantir que o código de moeda seja válido (BRL ou EUR)
+    const currencyCode = currency === "BRL" || currency === "EUR" ? currency : "BRL";
+    
     return value.toLocaleString("pt-BR", {
       style: "currency",
-      currency: currency,
+      currency: currencyCode,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     });
@@ -81,7 +87,7 @@ const DRECharts = ({ data, currency }: DREChartsProps) => {
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
               angle={-45}
               textAnchor="end"
-              height={80}
+              height={100}
             />
             <YAxis 
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
