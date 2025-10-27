@@ -113,10 +113,41 @@ serve(async (req) => {
     const entries = [];
     let duplicates = 0;
     let unrecognized = 0;
+    let skipped = 0;
 
     for (const row of data) {
+      // Validar campos obrigatórios
+      const postingDate = row['Data de Lançamento'] as string | number | Date | undefined;
+      const objectCode = row['Objeto'];
+      const costClass = row['Classe de Custo'];
+      const valueBRL = row['Valor BRL'];
+      const valueEUR = row['Valor EUR'];
+
+      // Skip linhas vazias ou inválidas
+      if (!postingDate || !objectCode || !costClass || valueBRL === undefined || valueEUR === undefined) {
+        console.log(`[process-excel-upload] Linha ignorada por falta de dados obrigatórios:`, {
+          postingDate, objectCode, costClass, valueBRL, valueEUR
+        });
+        skipped++;
+        continue;
+      }
+
+      // Converter data se necessário
+      let formattedDate: string;
+      if (typeof postingDate === 'string') {
+        formattedDate = postingDate;
+      } else if (typeof postingDate === 'number') {
+        // Excel date serial number
+        const excelEpoch = new Date(1899, 11, 30);
+        const date = new Date(excelEpoch.getTime() + postingDate * 86400000);
+        formattedDate = date.toISOString().split('T')[0];
+      } else {
+        // Assume Date object
+        formattedDate = (postingDate as Date).toISOString().split('T')[0];
+      }
+
       // Buscar classificação na legenda
-      const classification = legend?.find(l => l.account_number === row['Classe de Custo']);
+      const classification = legend?.find(l => l.account_number === costClass);
       
       if (!classification) {
         unrecognized++;
@@ -126,9 +157,9 @@ serve(async (req) => {
       const { data: existing } = await supabaseClient
         .from('financial_entries')
         .select('id')
-        .eq('posting_date', row['Data de Lançamento'])
-        .eq('object_code', row['Objeto'])
-        .eq('value_brl', row['Valor BRL'])
+        .eq('posting_date', formattedDate)
+        .eq('object_code', objectCode)
+        .eq('value_brl', valueBRL)
         .eq('user_id', user.id)
         .maybeSingle();
 
@@ -140,17 +171,17 @@ serve(async (req) => {
       entries.push({
         user_id: user.id,
         upload_id: uploadHistory.id,
-        posting_date: row['Data de Lançamento'],
-        object_code: row['Objeto'],
-        object_name: row['Objeto'],
-        cost_class: row['Classe de Custo'],
+        posting_date: formattedDate,
+        object_code: objectCode,
+        object_name: objectCode,
+        cost_class: costClass,
         cost_class_description: classification?.description || null,
         cost_type: classification?.cost_type || row['Tipo de Custo'] || null,
         macro_cost_type: classification?.macro_cost_type || row['Macro Tipo de Custo'] || null,
-        value_brl: row['Valor BRL'],
-        value_eur: row['Valor EUR'],
-        corrected_value_brl: row['Valor BRL'],
-        corrected_value_eur: row['Valor EUR'],
+        value_brl: valueBRL,
+        value_eur: valueEUR,
+        corrected_value_brl: valueBRL,
+        corrected_value_eur: valueEUR,
         is_duplicate: isDuplicate,
         is_unrecognized: !classification,
         pep_element: row['Elemento PEP'] || null,
@@ -164,7 +195,7 @@ serve(async (req) => {
     }
 
     console.log(`[process-excel-upload] Preparando inserção de ${entries.length} entradas`);
-    console.log(`[process-excel-upload] Duplicatas: ${duplicates}, Não reconhecidos: ${unrecognized}`);
+    console.log(`[process-excel-upload] Duplicatas: ${duplicates}, Não reconhecidos: ${unrecognized}, Ignoradas: ${skipped}`);
 
     // Inserir entradas
     const { error: insertError } = await supabaseClient
