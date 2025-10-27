@@ -88,19 +88,23 @@ serve(async (req) => {
 
     console.log(`[process-excel-upload] Upload history criado: ${uploadHistory.id}`);
 
-    // Processar Excel
+    // Processar Excel - pular linha de cabeçalho
     const arrayBuffer = await file.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
-
-    console.log(`[process-excel-upload] ${data.length} linhas encontradas no Excel`);
     
-    // Logar amostra dos dados para debug
+    // Usar range para pular a primeira linha (cabeçalho já processado)
+    const data = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+      range: 1, // Começa da segunda linha (índice 1)
+      raw: false // Converte datas e números para strings automaticamente
+    });
+
+    console.log(`[process-excel-upload] ${data.length} linhas de dados encontradas (excluindo cabeçalho)`);
+    
     if (data.length > 0) {
-      console.log(`[process-excel-upload] Primeiras colunas detectadas:`, Object.keys(data[0]));
-      console.log(`[process-excel-upload] Primeira linha de dados:`, JSON.stringify(data[0]).substring(0, 500));
+      console.log(`[process-excel-upload] Colunas:`, Object.keys(data[0]));
+      console.log(`[process-excel-upload] Primeira linha real:`, JSON.stringify(data[0]).substring(0, 500));
     }
 
     // Buscar legenda de classificação
@@ -122,40 +126,19 @@ serve(async (req) => {
     let skipped = 0;
 
     for (const row of data) {
-      // Tentar múltiplas variações dos nomes das colunas (com trim para remover espaços)
-      const keys = Object.keys(row);
-      const postingDate = (
-        row['Data de Lançamento'] || 
-        row['Data de Lancamento'] ||
-        row['Data'] ||
-        keys.find(k => k.toLowerCase().includes('data'))
-      ) as string | number | Date | undefined;
+      // Mapear colunas pelo nome exato detectado
+      const postingDate = row['Data de lançamento'] as string | number | Date | undefined;
+      const objectCode = row['Denominação de objeto'] || row['Objeto'];
+      const costClass = row['Classe de custo'];
       
-      const objectCode = (
-        row['Objeto'] ||
-        row['Object'] ||
-        keys.find(k => k.toLowerCase().includes('objeto'))
-      );
+      // Buscar valores em reais e euros - tentar diferentes variações
+      const valueBRL = row['Montante em Moeda interna'] || 
+                       row['Valor BRL'] || 
+                       row['Montante (BRL)'];
       
-      const costClass = (
-        row['Classe de Custo'] ||
-        row['Classe'] ||
-        keys.find(k => k.toLowerCase().includes('classe'))
-      );
-      
-      const valueBRL = (
-        row['Valor BRL'] ||
-        row['BRL'] ||
-        row['Valor R$'] ||
-        keys.find(k => k.toLowerCase().includes('brl') || k.toLowerCase().includes('r$'))
-      );
-      
-      const valueEUR = (
-        row['Valor EUR'] ||
-        row['EUR'] ||
-        row['Valor €'] ||
-        keys.find(k => k.toLowerCase().includes('eur') || k.toLowerCase().includes('€'))
-      );
+      const valueEUR = row['Montante na moeda do doc.'] || 
+                       row['Valor EUR'] || 
+                       row['Montante (EUR)'];
 
       // Skip linhas vazias ou inválidas
       if (!postingDate || !objectCode || !costClass || valueBRL === undefined || valueEUR === undefined) {
