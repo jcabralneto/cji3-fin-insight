@@ -84,16 +84,70 @@ serve(async (req) => {
       throw new Error('Planilha sem dados');
     }
 
-    // MAPEAMENTO CORRETO DAS COLUNAS CJI3
-    // Índice 0 = Coluna A, Índice 1 = Coluna B, etc.
-    const COL_POSTING_DATE = 1;  // Coluna B
-    const COL_OBJECT = 3;         // Coluna D  
-    const COL_COST_CLASS = 5;     // Coluna F
-    const COL_VALUE_EUR = 9;      // Coluna J
-    const COL_VALUE_BRL = 20;     // Coluna U
+    // Detectar cabeçalhos e mapear colunas de forma resiliente
+    const headerRow = jsonData[0] as any[];
+    const normalize = (s: any) =>
+      String(s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+
+    const headersNorm = headerRow.map(normalize);
+    const findIndex = (candidates: string[]) =>
+      headersNorm.findIndex((h) => candidates.some((c) => h.includes(c)));
+
+    // Candidatos por coluna (com fallback por índice fixo caso não encontre)
+    const idxDate = (() => {
+      const i = findIndex(['data de lancamento']);
+      return i >= 0 ? i : 1; // Coluna B
+    })();
+
+    const idxObject = (() => {
+      const i = findIndex(['denominacao de objeto', 'objeto']);
+      return i >= 0 ? i : 3; // Coluna D
+    })();
+
+    const idxCostClass = (() => {
+      const i = findIndex(['classe de custo']);
+      return i >= 0 ? i : 5; // Coluna F
+    })();
+
+    const idxValueEUR = (() => {
+      const i = findIndex([
+        'valor moed transacao',
+        'valor moeda transacao',
+        'valor em euro',
+        'valor eur',
+      ]);
+      return i >= 0 ? i : 9; // Coluna J
+    })();
+
+    const idxValueBRL = (() => {
+      const i = findIndex([
+        'valor moeda acc',
+        'valor em reais',
+        'valor brl',
+        'valor em real',
+      ]);
+      return i >= 0 ? i : 20; // Coluna U
+    })();
+
+    const idxCurrencyDoc = (() => {
+      const i = findIndex(['moeda da transacao']);
+      return i >= 0 ? i : -1;
+    })();
+
+    console.log(
+      `[process-excel-upload] Cabeçalho detectado:`, JSON.stringify(headerRow, null, 2)
+    );
+    console.log(
+      `[process-excel-upload] Índices -> data: ${idxDate} obj: ${idxObject} classe: ${idxCostClass} valEUR: ${idxValueEUR} valBRL: ${idxValueBRL} moedaDoc: ${idxCurrencyDoc}`
+    );
 
     const dataRows = jsonData.slice(1); // Pular cabeçalho
-
+    
     // Buscar legenda
     const { data: legend, error: legendError } = await supabaseClient
       .from('cost_class_legend')
@@ -112,23 +166,27 @@ serve(async (req) => {
     let unrecognized = 0;
     let processed = 0;
 
-    for (const row of dataRows) {
+    for (const rowRaw of dataRows) {
       try {
-        const postingDateRaw = row[COL_POSTING_DATE];
-        const objectCode = row[COL_OBJECT];
-        const costClass = String(row[COL_COST_CLASS] || '').trim();
-        const valueEURRaw = row[COL_VALUE_EUR];
-        const valueBRLRaw = row[COL_VALUE_BRL];
+        const row = rowRaw as any[];
+        const postingDateRaw = row[idxDate];
+        const objectCode = row[idxObject];
+        const costClass = String(row[idxCostClass] || '').trim();
+        const valueEURRaw = row[idxValueEUR];
+        const valueBRLRaw = row[idxValueBRL];
 
         // Validar campos obrigatórios
-        if (!postingDateRaw || !objectCode || !costClass || valueEURRaw === null || valueBRLRaw === null) {
+        if (!postingDateRaw || !objectCode || !costClass || (valueEURRaw == null && valueBRLRaw == null)) {
           continue;
         }
 
         // Parsear valores
         const parseValue = (v: any): number => {
           if (typeof v === 'number') return v;
-          const str = String(v).replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
+          const str = String(v)
+            .replace(/\./g, '')
+            .replace(',', '.')
+            .replace(/[^0-9.-]/g, '');
           const num = parseFloat(str);
           return isNaN(num) ? 0 : num;
         };
@@ -144,18 +202,43 @@ serve(async (req) => {
           const date = new Date(excelEpoch.getTime() + postingDateRaw * 86400000);
           formattedDate = date.toISOString().split('T')[0];
         } else {
-          // Tentar parse de string
+          // Tentar parse de string (suporta dd/mm/yyyy, mm/dd/yyyy, m/d/yy)
           const dateStr = String(postingDateRaw).trim();
-          const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-          if (match) {
-            const [_, day, month, year] = match;
-            formattedDate = `${year}-${month}-${day}`;
+          const parts = dateStr.split(/[\\/]/).map((p) => p.trim());
+          if (parts.length === 3) {
+            let p1 = parseInt(parts[0], 10);
+            let p2 = parseInt(parts[1], 10);
+            let year = parseInt(parts[2], 10);
+            if (parts[2].length <= 2) {
+              year = 2000 + year; // assume século 2000+ para 2 dígitos
+            }
+            let day: number;
+            let month: number;
+            if (p1 > 12 && p2 <= 12) {
+              // dd/mm
+              day = p1; month = p2;
+            } else if (p2 > 12 && p1 <= 12) {
+              // mm/dd
+              day = p2; month = p1;
+            } else {
+              // Ambíguo: assumir mm/dd (mais comum em "9/3/25")
+              day = p2; month = p1;
+            }
+            const d = new Date(Date.UTC(year, month - 1, day));
+            if (!isNaN(d.getTime())) {
+              formattedDate = d.toISOString().split('T')[0];
+            } else {
+              const d2 = new Date(dateStr);
+              if (isNaN(d2.getTime())) continue;
+              formattedDate = d2.toISOString().split('T')[0];
+            }
           } else {
-            const date = new Date(dateStr);
-            if (isNaN(date.getTime())) continue;
-            formattedDate = date.toISOString().split('T')[0];
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) continue;
+            formattedDate = d.toISOString().split('T')[0];
           }
         }
+
 
         // Buscar classificação
         const classification = legend?.find(l => l.account_number === costClass);
