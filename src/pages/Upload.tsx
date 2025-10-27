@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Upload as UploadIcon, FileSpreadsheet, AlertCircle, CheckCircle2, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/browserClient";
 
 interface ValidationResult {
   status: 'success' | 'warning' | 'error';
@@ -30,7 +32,9 @@ const Upload = () => {
   const [progress, setProgress] = useState(0);
   const [validationResults, setValidationResults] = useState<ValidationResult[]>([]);
   const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -148,6 +152,48 @@ const Upload = () => {
     setValidationResults([]);
     setPreviewData([]);
     setProgress(0);
+  };
+
+  const handleConfirmAndProcess = async () => {
+    setIsSaving(true);
+    
+    try {
+      // Preparar dados para inserção no banco
+      const dataToInsert = previewData.map(row => ({
+        posting_date: new Date(row.date.split('/').reverse().join('-')).toISOString(),
+        object_code: row.object,
+        cost_class: row.costClass,
+        value_brl: row.valueBRL,
+        value_eur: row.valueEUR,
+        corrected_value_brl: row.valueBRL,
+        corrected_value_eur: row.valueEUR,
+        cost_type: row.costType,
+        macro_cost_type: row.macroCostType,
+      }));
+
+      const { error } = await supabase
+        .from('financial_entries')
+        .insert(dataToInsert);
+
+      if (error) throw error;
+
+      toast({
+        title: "Dados salvos com sucesso!",
+        description: "Os lançamentos foram salvos no banco de dados.",
+      });
+
+      // Redirecionar para o dashboard
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Erro ao salvar dados:', error);
+      toast({
+        title: "Erro ao salvar dados",
+        description: "Ocorreu um erro ao salvar os dados. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const getStatusBadge = (status: PreviewRow['status']) => {
@@ -293,8 +339,8 @@ const Upload = () => {
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold">Preview dos Dados</h2>
-              <Button>
-                Confirmar e Processar
+              <Button onClick={handleConfirmAndProcess} disabled={isSaving}>
+                {isSaving ? "Salvando..." : "Confirmar e Processar"}
               </Button>
             </div>
             <div className="overflow-x-auto">
