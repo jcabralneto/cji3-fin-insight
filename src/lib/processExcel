@@ -1,0 +1,220 @@
+import * as XLSX from 'xlsx';
+import { supabase } from '@/integrations/supabase/browserClient';
+
+// Legenda de classificação (fixa no client)
+const COST_LEGEND: Record<string, { costType: string; macroCostType: string }> = {
+  // RECEITAS
+  '400000': { costType: 'Receita de Serviços', macroCostType: 'Receita' },
+  '401000': { costType: 'Receita de Projetos', macroCostType: 'Receita' },
+  '402000': { costType: 'Receita de Consultoria', macroCostType: 'Receita' },
+  '410000': { costType: 'Receita de Vendas', macroCostType: 'Receita' },
+  '420000': { costType: 'Receita Financeira', macroCostType: 'Receita' },
+  
+  // IMPOSTOS
+  '475110': { costType: 'ISS', macroCostType: 'Impostos' },
+  '476100': { costType: 'IRRF', macroCostType: 'Impostos' },
+  '476200': { costType: 'INSS', macroCostType: 'Impostos' },
+  '476300': { costType: 'PIS', macroCostType: 'Impostos' },
+  '476400': { costType: 'COFINS', macroCostType: 'Impostos' },
+  '476500': { costType: 'CSLL', macroCostType: 'Impostos' },
+  '476600': { costType: 'IRPJ', macroCostType: 'Impostos' },
+  
+  // CUSTOS DIRETOS
+  '620000': { costType: 'Materiais Diretos', macroCostType: 'Custo Direto' },
+  '621000': { costType: 'Serviços Técnicos', macroCostType: 'Custo Direto' },
+  '622000': { costType: 'Consultoria Externa', macroCostType: 'Custo Direto' },
+  '623000': { costType: 'Subcontratação', macroCostType: 'Custo Direto' },
+  '624000': { costType: 'Equipamentos', macroCostType: 'Custo Direto' },
+  '625000': { costType: 'Software e Licenças', macroCostType: 'Custo Direto' },
+  
+  // DESPESAS OPERACIONAIS
+  '630000': { costType: 'Salários', macroCostType: 'Despesa Operacional' },
+  '631000': { costType: 'Encargos Sociais', macroCostType: 'Despesa Operacional' },
+  '632000': { costType: 'Benefícios', macroCostType: 'Despesa Operacional' },
+  '633000': { costType: 'Treinamento', macroCostType: 'Despesa Operacional' },
+  '640000': { costType: 'Aluguel', macroCostType: 'Despesa Operacional' },
+  '641000': { costType: 'Utilidades', macroCostType: 'Despesa Operacional' },
+  '642000': { costType: 'Manutenção', macroCostType: 'Despesa Operacional' },
+  '650000': { costType: 'Marketing', macroCostType: 'Despesa Operacional' },
+  '651000': { costType: 'Comissões', macroCostType: 'Despesa Operacional' },
+  '660000': { costType: 'Viagens', macroCostType: 'Despesa Operacional' },
+  '661000': { costType: 'Comunicação', macroCostType: 'Despesa Operacional' },
+  '662000': { costType: 'Material de Escritório', macroCostType: 'Despesa Operacional' },
+  '663000': { costType: 'Serviços Jurídicos', macroCostType: 'Despesa Operacional' },
+  '664000': { costType: 'Serviços Contábeis', macroCostType: 'Despesa Operacional' },
+  '665000': { costType: 'Seguros', macroCostType: 'Despesa Operacional' },
+  '667000': { costType: 'Depreciação', macroCostType: 'Despesa Operacional' },
+  '668000': { costType: 'Amortização', macroCostType: 'Despesa Operacional' },
+};
+
+interface ProcessedEntry {
+  posting_date: string;
+  object_code: string;
+  object_name: string;
+  cost_class: string;
+  cost_class_description: string | null;
+  cost_type: string | null;
+  macro_cost_type: string | null;
+  value_brl: number;
+  value_eur: number;
+  corrected_value_brl: number;
+  corrected_value_eur: number;
+  is_duplicate: boolean;
+  is_unrecognized: boolean;
+  entry_type: 'credit' | 'debit';
+}
+
+export async function processExcelFile(file: File) {
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user) {
+    throw new Error('Usuário não autenticado');
+  }
+
+  console.log('✅ Processando arquivo para user_id:', user.id);
+
+  // Ler arquivo Excel
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+  const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { 
+    header: 1, 
+    raw: false,
+    defval: null 
+  });
+
+  if (!jsonData || jsonData.length < 2) {
+    throw new Error('Planilha sem dados');
+  }
+
+  // Índices das colunas CJI3
+  const COL_POSTING_DATE = 1;  // Coluna B
+  const COL_OBJECT = 3;         // Coluna D  
+  const COL_COST_CLASS = 5;     // Coluna F
+  const COL_VALUE_EUR = 9;      // Coluna J
+  const COL_VALUE_BRL = 20;     // Coluna U
+
+  const entries: ProcessedEntry[] = [];
+  const stats = { valid: 0, unrecognized: 0, duplicates: 0 };
+
+  // Processar linhas (pular cabeçalho)
+  for (let i = 1; i < jsonData.length; i++) {
+    const row = jsonData[i];
+    
+    try {
+      const postingDateRaw = row[COL_POSTING_DATE];
+      const objectCode = row[COL_OBJECT];
+      const costClass = String(row[COL_COST_CLASS] || '').trim();
+      const valueEURRaw = row[COL_VALUE_EUR];
+      const valueBRLRaw = row[COL_VALUE_BRL];
+
+      // Validar campos obrigatórios
+      if (!postingDateRaw || !objectCode || !costClass || valueEURRaw === null || valueBRLRaw === null) {
+        continue;
+      }
+
+      // Parsear valores
+      const parseValue = (v: any): number => {
+        if (typeof v === 'number') return v;
+        const str = String(v).replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, '');
+        const num = parseFloat(str);
+        return isNaN(num) ? 0 : num;
+      };
+
+      const valueEUR = parseValue(valueEURRaw);
+      const valueBRL = parseValue(valueBRLRaw);
+
+      // Converter data
+      let formattedDate: string;
+      if (typeof postingDateRaw === 'number') {
+        const excelEpoch = new Date(1899, 11, 30);
+        const date = new Date(excelEpoch.getTime() + postingDateRaw * 86400000);
+        formattedDate = date.toISOString().split('T')[0];
+      } else {
+        const dateStr = String(postingDateRaw).trim();
+        const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (match) {
+          const [_, day, month, year] = match;
+          formattedDate = `${year}-${month}-${day}`;
+        } else {
+          const date = new Date(dateStr);
+          if (isNaN(date.getTime())) continue;
+          formattedDate = date.toISOString().split('T')[0];
+        }
+      }
+
+      // Buscar classificação na legenda
+      const classification = COST_LEGEND[costClass];
+      
+      if (!classification) {
+        stats.unrecognized++;
+      } else {
+        stats.valid++;
+      }
+
+      // Correção de sinais: valores negativos = receitas, converter para positivo
+      const correctedValueEUR = Math.abs(valueEUR);
+      const correctedValueBRL = Math.abs(valueBRL);
+
+      // Verificar duplicatas
+      const { data: existing } = await supabase
+        .from('financial_entries')
+        .select('id')
+        .eq('posting_date', formattedDate)
+        .eq('object_code', objectCode)
+        .eq('cost_class', costClass)
+        .eq('value_brl', valueBRL)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      const isDuplicate = !!existing;
+      if (isDuplicate) {
+        stats.duplicates++;
+      }
+
+      entries.push({
+        posting_date: formattedDate,
+        object_code: String(objectCode).trim(),
+        object_name: String(objectCode).trim(),
+        cost_class: costClass,
+        cost_class_description: classification?.costType || null,
+        cost_type: classification?.costType || null,
+        macro_cost_type: classification?.macroCostType || null,
+        value_brl: valueBRL,
+        value_eur: valueEUR,
+        corrected_value_brl: correctedValueBRL,
+        corrected_value_eur: correctedValueEUR,
+        is_duplicate: isDuplicate,
+        is_unrecognized: !classification,
+        entry_type: valueEUR < 0 ? 'credit' : 'debit',
+      });
+    } catch (error) {
+      console.error('Erro ao processar linha:', error);
+      continue;
+    }
+  }
+
+  console.log('📊 Processadas:', entries.length, 'entradas');
+  console.log('📊 Stats:', stats);
+
+  // Salvar no Supabase
+  if (entries.length > 0) {
+    const entriesToInsert = entries.map(entry => ({
+      ...entry,
+      user_id: user.id,
+    }));
+
+    const { error } = await supabase
+      .from('financial_entries')
+      .insert(entriesToInsert);
+
+    if (error) {
+      console.error('❌ Erro ao salvar:', error);
+      throw error;
+    }
+
+    console.log('✅ Dados salvos com sucesso!');
+  }
+
+  return { entries, stats };
+}
