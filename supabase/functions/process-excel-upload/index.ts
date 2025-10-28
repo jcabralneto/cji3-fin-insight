@@ -280,8 +280,10 @@ serve(async (req) => {
             return { line: 'IMPOSTOS_LUCRO', rule: 'NIVEL1_IMPOSTO_LUCRO' };
           }
 
-          // NÍVEL 2: Cost Type + Tipo Transação
-          if (macro === 'Revenues') {
+          // NÍVEL 2: Cost Type + Tipo Transação (aceita inglês e português, case-insensitive)
+          const macroLower = macro.toLowerCase();
+          
+          if (macroLower === 'revenues' || macroLower === 'receita') {
             if (['Revenues Devices', 'Revenues Services'].includes(cost)) {
               if (transaction === 'credit') {
                 return { line: 'RECEITA_BRUTA', rule: 'NIVEL2_REVENUES_CREDIT' };
@@ -291,7 +293,7 @@ serve(async (req) => {
             }
           }
 
-          if (macro === 'Costs') {
+          if (macroLower === 'costs' || macroLower === 'custo' || macroLower === 'despesa operacional') {
             // Manufacturing
             if (cost === 'Manufacturing') {
               if (transaction === 'debit') {
@@ -342,8 +344,8 @@ serve(async (req) => {
             }
           }
 
-          // NÍVEL 3: Macro Type + Transação (Fallback)
-          if (macro === 'Revenues') {
+          // NÍVEL 3: Macro Type + Transação (Fallback, aceita inglês e português)
+          if (macroLower === 'revenues' || macroLower === 'receita') {
             if (transaction === 'credit') {
               return { line: 'OUTRAS_RECEITAS', rule: 'NIVEL3_REVENUES_CREDIT' };
             } else {
@@ -351,7 +353,7 @@ serve(async (req) => {
             }
           }
 
-          if (macro === 'Costs') {
+          if (macroLower === 'costs' || macroLower === 'custo' || macroLower === 'despesa operacional') {
             if (transaction === 'debit') {
               return { line: 'OUTRAS_DESPESAS', rule: 'NIVEL3_COSTS_DEBIT' };
             } else {

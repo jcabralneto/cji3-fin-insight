@@ -73,6 +73,8 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [entries, setEntries] = useState<FinancialEntry[]>([]);
   const [selectedCurrency, setSelectedCurrency] = useState<'BRL' | 'EUR'>('BRL');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   useEffect(() => {
     document.title = 'Dashboard DRE | Análise Financeira';
@@ -125,7 +127,21 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const dreData = useMemo(() => calculateDRE(entries, selectedCurrency), [entries, selectedCurrency]);
+  const filteredEntries = useMemo(() => {
+    let filtered = entries;
+    
+    if (startDate) {
+      filtered = filtered.filter(e => e.posting_date >= startDate);
+    }
+    
+    if (endDate) {
+      filtered = filtered.filter(e => e.posting_date <= endDate);
+    }
+    
+    return filtered;
+  }, [entries, startDate, endDate]);
+
+  const dreData = useMemo(() => calculateDRE(filteredEntries, selectedCurrency), [filteredEntries, selectedCurrency]);
 
   const formatCurrency = (value: number) => {
     const code = selectedCurrency;
@@ -144,12 +160,12 @@ const Dashboard = () => {
         <p className="text-muted-foreground">Demonstração do Resultado por composição e gráficos</p>
       </header>
 
-      <section className="flex items-center gap-4">
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="p-4">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2">
             <span className="text-sm text-muted-foreground">Moeda:</span>
             <Select value={selectedCurrency} onValueChange={(v: 'BRL' | 'EUR') => setSelectedCurrency(v)}>
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Moeda" />
               </SelectTrigger>
               <SelectContent>
@@ -159,7 +175,54 @@ const Dashboard = () => {
             </Select>
           </div>
         </Card>
+
+        <Card className="p-4">
+          <div className="flex flex-col gap-2">
+            <label htmlFor="start-date" className="text-sm text-muted-foreground">Data Inicial:</label>
+            <input
+              id="start-date"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-2 border rounded-md bg-background text-foreground"
+            />
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex flex-col gap-2">
+            <label htmlFor="end-date" className="text-sm text-muted-foreground">Data Final:</label>
+            <input
+              id="end-date"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-2 border rounded-md bg-background text-foreground"
+            />
+          </div>
+        </Card>
       </section>
+
+      {(startDate || endDate) && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Exibindo {filteredEntries.length} de {entries.length} lançamentos
+              {startDate && ` • A partir de ${new Date(startDate).toLocaleDateString('pt-BR')}`}
+              {endDate && ` • Até ${new Date(endDate).toLocaleDateString('pt-BR')}`}
+            </p>
+            <button
+              onClick={() => {
+                setStartDate('');
+                setEndDate('');
+              }}
+              className="text-sm text-primary hover:underline"
+            >
+              Limpar filtros
+            </button>
+          </div>
+        </Card>
+      )}
 
       {isLoading ? (
         <p className="text-muted-foreground">Carregando dados...</p>
