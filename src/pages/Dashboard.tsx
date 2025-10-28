@@ -20,6 +20,7 @@ interface DREData {
 interface FinancialEntry {
   posting_date: string;
   macro_cost_type: string | null;
+  dre_line: string | null;
   corrected_value_brl: number;
   corrected_value_eur: number;
   value_brl: number;
@@ -31,20 +32,27 @@ function calculateDRE(entries: FinancialEntry[], currency: 'BRL' | 'EUR'): DREDa
   const getVal = (e: FinancialEntry) => currency === 'EUR' ? (Number(e.corrected_value_eur ?? e.value_eur) || 0) : (Number(e.corrected_value_brl ?? e.value_brl) || 0);
 
   const receitaBruta = entries
-    .filter(e => (e.macro_cost_type || '').toLowerCase() === 'receita')
+    .filter(e => e.dre_line === 'RECEITA_BRUTA' || e.dre_line === 'OUTRAS_RECEITAS')
     .reduce((sum, e) => sum + getVal(e), 0);
 
   const deducoes = entries
-    .filter(e => (e.macro_cost_type || '').toLowerCase() === 'impostos')
-    .reduce((sum, e) => sum + getVal(e), 0);
+    .filter(e => ['DEDUCOES_RECEITA_IMPOSTOS', 'DEVOLUCOES_ABATIMENTOS', 'OUTRAS_DEDUCOES'].includes(e.dre_line || ''))
+    .reduce((sum, e) => sum + Math.abs(getVal(e)), 0);
 
   const custosDirectos = entries
-    .filter(e => (e.macro_cost_type || '').toLowerCase() === 'custo direto')
-    .reduce((sum, e) => sum + getVal(e), 0);
+    .filter(e => e.dre_line === 'CUSTOS_DIRETOS')
+    .reduce((sum, e) => sum + Math.abs(getVal(e)), 0);
 
   const despesasOperacionais = entries
-    .filter(e => (e.macro_cost_type || '').toLowerCase() === 'despesa operacional')
-    .reduce((sum, e) => sum + getVal(e), 0);
+    .filter(e => [
+      'DESPESAS_VENDAS', 
+      'DESPESAS_ADMINISTRATIVAS', 
+      'DESPESAS_GERAIS',
+      'DESPESAS_OPERACIONAIS_IMPOSTOS',
+      'DESPESAS_FINANCEIRAS',
+      'OUTRAS_DESPESAS'
+    ].includes(e.dre_line || ''))
+    .reduce((sum, e) => sum + Math.abs(getVal(e)), 0);
 
   const receitaLiquida = receitaBruta - deducoes;
   const lucroBruto = receitaLiquida - custosDirectos;
