@@ -280,7 +280,7 @@ serve(async (req) => {
           cost_class: costClass,
           cost_class_description: classification?.description || 'Sem legenda',
           cost_type: classification?.cost_type || 'não classificado',
-          macro_cost_type: classification?.macro_cost_type || (valueEUR < 0 ? 'receita' : 'despesa operacional'),
+          macro_cost_type: classification?.macro_cost_type || (valueEUR < 0 ? 'Revenues' : 'Costs'),
           value_brl: valueBRL,  // Valor original (com sinal)
           value_eur: valueEUR,  // Valor original (com sinal)
           corrected_value_brl: correctedValueBRL,  // Valor corrigido (sempre positivo)

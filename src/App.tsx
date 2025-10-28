@@ -9,6 +9,7 @@ import Upload from "./pages/Upload";
 import Auth from "./pages/Auth";
 import ProtectedRoute from "./components/ProtectedRoute";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const UploadLegend = lazy(() => import("./pages/UploadLegend"));
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +25,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
+            <Route path="/upload-legend" element={<ProtectedRoute><UploadLegend /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
