@@ -61,6 +61,7 @@ export type Database = {
       }
       financial_entries: {
         Row: {
+          classification_rule: string | null
           corrected_value_brl: number
           corrected_value_eur: number
           cost_class: string
@@ -70,6 +71,7 @@ export type Database = {
           currency: string | null
           document_number: string | null
           document_text: string | null
+          dre_line: string | null
           entry_date: string | null
           entry_type: string | null
           id: string
@@ -89,6 +91,7 @@ export type Database = {
           value_eur: number
         }
         Insert: {
+          classification_rule?: string | null
           corrected_value_brl: number
           corrected_value_eur: number
           cost_class: string
@@ -98,6 +101,7 @@ export type Database = {
           currency?: string | null
           document_number?: string | null
           document_text?: string | null
+          dre_line?: string | null
           entry_date?: string | null
           entry_type?: string | null
           id?: string
@@ -117,6 +121,7 @@ export type Database = {
           value_eur: number
         }
         Update: {
+          classification_rule?: string | null
           corrected_value_brl?: number
           corrected_value_eur?: number
           cost_class?: string
@@ -126,6 +131,7 @@ export type Database = {
           currency?: string | null
           document_number?: string | null
           document_text?: string | null
+          dre_line?: string | null
           entry_date?: string | null
           entry_type?: string | null
           id?: string

@@ -248,12 +248,125 @@ serve(async (req) => {
         }
 
         // ========================================
-        // CORREÇÃO DE SINAIS (REGRA SAP CJI3)
+        // CORREÇÃO DE SINAIS E TIPO DE TRANSAÇÃO
         // ========================================
-        // Valores NEGATIVOS no SAP = RECEITAS (Crédito) → Converter para POSITIVO
-        // Valores POSITIVOS no SAP = DESPESAS (Débito) → Manter POSITIVO
+        // Valores NEGATIVOS no SAP = CRÉDITO (Entrada)
+        // Valores POSITIVOS no SAP = DÉBITO (Saída)
         const correctedValueEUR = Math.abs(valueEUR);
         const correctedValueBRL = Math.abs(valueBRL);
+        const transactionType = valueEUR < 0 ? 'credit' : 'debit';
+
+        // ========================================
+        // CLASSIFICAÇÃO DRE (3 DIMENSÕES)
+        // ========================================
+        const macroCostType = classification?.macro_cost_type || (valueEUR < 0 ? 'Revenues' : 'Costs');
+        const costType = classification?.cost_type || 'não classificado';
+        
+        // Função para classificar linha DRE
+        const classifyDRELine = (
+          macro: string, 
+          cost: string, 
+          transaction: string, 
+          classCode: string
+        ): { line: string; rule: string } => {
+          // NÍVEL 1: Classes específicas de impostos
+          const salesTaxes = ['PCR1TAZ050', 'PCR1TAZL08', 'PCR1TAZL10', 'ACR1TA1L05'];
+          const incomeTaxes = ['PCLT000000', 'ACNT000010', 'ACNT000L42', 'PCR1TA2L9J', 'RI11000000', 'RI12000000'];
+          
+          if (salesTaxes.includes(classCode) && transaction === 'debit') {
+            return { line: 'DEDUCOES_RECEITA_IMPOSTOS', rule: 'NIVEL1_IMPOSTO_VENDAS' };
+          }
+          if (incomeTaxes.includes(classCode) && transaction === 'debit') {
+            return { line: 'IMPOSTOS_LUCRO', rule: 'NIVEL1_IMPOSTO_LUCRO' };
+          }
+
+          // NÍVEL 2: Cost Type + Tipo Transação
+          if (macro === 'Revenues') {
+            if (['Revenues Devices', 'Revenues Services'].includes(cost)) {
+              if (transaction === 'credit') {
+                return { line: 'RECEITA_BRUTA', rule: 'NIVEL2_REVENUES_CREDIT' };
+              } else {
+                return { line: 'DEVOLUCOES_ABATIMENTOS', rule: 'NIVEL2_REVENUES_DEBIT' };
+              }
+            }
+          }
+
+          if (macro === 'Costs') {
+            // Manufacturing
+            if (cost === 'Manufacturing') {
+              if (transaction === 'debit') {
+                return { line: 'CUSTOS_DIRETOS', rule: 'NIVEL2_MANUFACTURING_DEBIT' };
+              } else {
+                return { line: 'CUSTOS_DIRETOS_RECUPERACAO', rule: 'NIVEL2_MANUFACTURING_CREDIT' };
+              }
+            }
+
+            // Despesas com Vendas
+            if (['Travel', 'Marketing'].includes(cost)) {
+              if (transaction === 'debit') {
+                return { line: 'DESPESAS_VENDAS', rule: 'NIVEL2_VENDAS_DEBIT' };
+              } else {
+                return { line: 'DESPESAS_VENDAS_RECUPERACAO', rule: 'NIVEL2_VENDAS_CREDIT' };
+              }
+            }
+
+            // Despesas Administrativas
+            if (['Personnel', 'Advisory', 'DH', 'Other costs'].includes(cost)) {
+              if (transaction === 'debit') {
+                return { line: 'DESPESAS_ADMINISTRATIVAS', rule: 'NIVEL2_ADMIN_DEBIT' };
+              } else {
+                return { line: 'DESPESAS_ADMINISTRATIVAS_RECUPERACAO', rule: 'NIVEL2_ADMIN_CREDIT' };
+              }
+            }
+
+            // Despesas Gerais
+            if (['Logistics', 'Management fee', 'Capex D&A'].includes(cost)) {
+              if (transaction === 'debit') {
+                return { line: 'DESPESAS_GERAIS', rule: 'NIVEL2_GERAIS_DEBIT' };
+              } else {
+                return { line: 'DESPESAS_GERAIS_RECUPERACAO', rule: 'NIVEL2_GERAIS_CREDIT' };
+              }
+            }
+
+            // Resultado Financeiro
+            if (cost === 'Financial income' && transaction === 'credit') {
+              return { line: 'RECEITAS_FINANCEIRAS', rule: 'NIVEL2_FIN_INCOME' };
+            }
+            if (cost === 'Financial expenses' && transaction === 'debit') {
+              return { line: 'DESPESAS_FINANCEIRAS', rule: 'NIVEL2_FIN_EXPENSES' };
+            }
+
+            // Impostos genéricos
+            if (cost === 'Taxes' && transaction === 'debit') {
+              return { line: 'DESPESAS_OPERACIONAIS_IMPOSTOS', rule: 'NIVEL2_TAXES_OTHER' };
+            }
+          }
+
+          // NÍVEL 3: Macro Type + Transação (Fallback)
+          if (macro === 'Revenues') {
+            if (transaction === 'credit') {
+              return { line: 'OUTRAS_RECEITAS', rule: 'NIVEL3_REVENUES_CREDIT' };
+            } else {
+              return { line: 'OUTRAS_DEDUCOES', rule: 'NIVEL3_REVENUES_DEBIT' };
+            }
+          }
+
+          if (macro === 'Costs') {
+            if (transaction === 'debit') {
+              return { line: 'OUTRAS_DESPESAS', rule: 'NIVEL3_COSTS_DEBIT' };
+            } else {
+              return { line: 'OUTRAS_RECUPERACOES', rule: 'NIVEL3_COSTS_CREDIT' };
+            }
+          }
+
+          // NÍVEL 4: Residual
+          return { 
+            line: transaction === 'credit' ? 'NAO_CLASSIFICADO_CREDITO' : 'NAO_CLASSIFICADO_DEBITO', 
+            rule: 'NIVEL4_RESIDUAL' 
+          };
+        };
+
+        const dreClassification = classifyDRELine(macroCostType, costType, transactionType, costClass);
 
         // Verificar duplicatas
         const { data: existing } = await supabaseClient
@@ -279,15 +392,17 @@ serve(async (req) => {
           object_name: String(objectCode).trim(),
           cost_class: costClass,
           cost_class_description: classification?.description || 'Sem legenda',
-          cost_type: classification?.cost_type || 'não classificado',
-          macro_cost_type: classification?.macro_cost_type || (valueEUR < 0 ? 'Revenues' : 'Costs'),
+          cost_type: costType,
+          macro_cost_type: macroCostType,
           value_brl: valueBRL,  // Valor original (com sinal)
           value_eur: valueEUR,  // Valor original (com sinal)
           corrected_value_brl: correctedValueBRL,  // Valor corrigido (sempre positivo)
           corrected_value_eur: correctedValueEUR,  // Valor corrigido (sempre positivo)
           is_duplicate: isDuplicate,
           is_unrecognized: !classification,
-          entry_type: valueEUR < 0 ? 'credit' : 'debit',
+          entry_type: transactionType,
+          dre_line: dreClassification.line,
+          classification_rule: dreClassification.rule,
           pep_element: null,
           document_text: null,
           document_number: null,
